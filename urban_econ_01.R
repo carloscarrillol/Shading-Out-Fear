@@ -23,8 +23,8 @@ mex_muni <- st_as_sf(mex_spat)
 
 st_write(mex_muni, "mex_muni_gadm.shp", delete_layer = TRUE)
 
-carpeta_rasters <- "/Users/carloscarrillolazaro/Desktop/urban_econ_01/TIF"
-ruta_shapefile  <- "/Users/carloscarrillolazaro/Desktop/urban_econ_01/Mapa/mex_muni_gadm.shp"
+carpeta_rasters <- "/Users/..."
+ruta_shapefile  <- "/Users/..."
 ruta_panel      <- "data/panel_ndvi_mx.csv"
 
 # -----------------------------------------------------------------------------------
