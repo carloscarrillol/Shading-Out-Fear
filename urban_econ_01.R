@@ -15,6 +15,7 @@ library(readr)
 library(tidyr)
 library(foreign)
 
+
 #====================================================================================
 # Load and clean data
 #====================================================================================
@@ -24,8 +25,8 @@ mex_muni <- st_as_sf(mex_spat)
 
 st_write(mex_muni, "mex_muni_gadm.shp", delete_layer = TRUE)
 
-carpeta_rasters <- "/Users/..."
-ruta_shapefile  <- "/Users/..."
+carpeta_rasters <- "/Users/carloscarrillolazaro/Desktop/urban_econ_01/TIF"
+ruta_shapefile  <- "/Users/carloscarrillolazaro/Desktop/urban_econ_01/Mapa/mex_muni_gadm.shp"
 ruta_panel      <- "data/panel_ndvi_mx.csv"
 
 # -----------------------------------------------------------------------------------
@@ -274,26 +275,6 @@ cb_data <- inventario %>%
 
 cb_data_ensu <- cb_data %>% filter(encuesta == "ENSU")
 
-
-
-
-library(dplyr)
-library(stringr)
-library(purrr)
-library(foreign)
-library(tibble)
-library(tidyr)
-
-# ============================================================
-# Requiere que ya existan en la sesión: inventario, leer_dbf_seguro,
-# viv_data, cb_data (o cb_data_ensu) construidos en pasos previos.
-# ============================================================
-
-# ------------------------------------------------------------
-# 1. Función: agrega cve_mun a un data frame VIV completo (no solo distinct)
-#    Reutiliza la misma lógica de 4 esquemas ya validada.
-# ------------------------------------------------------------
-
 agregar_cve_mun <- function(df) {
   if (is.null(df)) return(NULL)
   cols <- colnames(df)
@@ -324,118 +305,93 @@ agregar_cve_mun <- function(df) {
   return(df %>% mutate(cve_mun = NA_character_))
 }
 
-# ------------------------------------------------------------
-# 2. Función: extrae percepción homologada de un archivo CB
-#    Devuelve tibble con: cve_mun (si está disponible directo),
-#    llave_hogar (para join con VIV si hace falta), percepcion (1-9)
-# ------------------------------------------------------------
-
-extraer_percepcion <- function(df, ruta) {
+extraer_indicadores <- function(df, ruta) {
   if (is.null(df)) {
-    warning("No se pudo leer CB: ", ruta)
+    warning("Could not read CB: ", ruta)
     return(NULL)
   }
   cols <- colnames(df)
-  
-  # Esquema 2016-2020: BP1_1 + CVE_MUN ya viene directo en el CB
-  if ("BP1_1" %in% cols && all(c("CVE_ENT", "CVE_MUN") %in% cols)) {
-    return(
-      df %>%
-        transmute(
-          cve_mun = paste0(
-            str_pad(as.character(as.integer(CVE_ENT)), 2, pad = "0"),
-            str_pad(as.character(as.integer(CVE_MUN)), 3, pad = "0")
-          ),
-          percepcion = as.integer(BP1_1),
-          ruta_cb = ruta
-        )
-    )
+  atestiguo_cols_nueva <- paste0("BP1_4_", 1:6)
+  habito_cols_nueva    <- paste0("BP1_5_", 1:5)
+  if ("BP1_1" %in% cols && "BP1_3" %in% cols &&
+      all(atestiguo_cols_nueva %in% cols) && all(habito_cols_nueva %in% cols)) {
+    if (all(c("CVE_ENT", "CVE_MUN") %in% cols)) {
+      cve_mun <- paste0(str_pad(as.character(as.integer(df$CVE_ENT)), 2, pad = "0"),
+                        str_pad(as.character(as.integer(df$CVE_MUN)), 3, pad = "0"))
+    } else if (all(c("ENT", "MUN") %in% cols)) {
+      cve_mun <- paste0(str_pad(as.character(as.integer(df$ENT)), 2, pad = "0"),
+                        str_pad(as.character(as.integer(df$MUN)), 3, pad = "0"))
+    } else {
+      warning("Nueva era CB without recognizable geography: ", ruta)
+      return(NULL)
+    }
+    return(tibble(
+      cve_mun     = cve_mun,
+      percepcion  = as.integer(df[["BP1_1"]]),
+      expectativa = as.integer(df[["BP1_3"]]),
+      atestiguo_n = rowSums(sapply(df[atestiguo_cols_nueva], function(x) as.integer(x) == 1), na.rm = TRUE),
+      atestiguo_valido = rowSums(sapply(df[atestiguo_cols_nueva], function(x) as.integer(x) %in% c(1, 2)), na.rm = TRUE) > 0,
+      habito_n    = rowSums(sapply(df[habito_cols_nueva], function(x) as.integer(x) == 1), na.rm = TRUE),
+      habito_valido = rowSums(sapply(df[habito_cols_nueva], function(x) as.integer(x) %in% c(1, 2)), na.rm = TRUE) > 0,
+      ruta_cb     = ruta
+    ))
   }
-  
-  # Esquema 2016 (variante): BP1_1 + ENT/MUN sin prefijo CVE_
-  if ("BP1_1" %in% cols && all(c("ENT", "MUN") %in% cols)) {
-    return(
-      df %>%
-        transmute(
-          cve_mun = paste0(
-            str_pad(as.character(as.integer(ENT)), 2, pad = "0"),
-            str_pad(as.character(as.integer(MUN)), 3, pad = "0")
-          ),
-          percepcion = as.integer(BP1_1),
-          ruta_cb = ruta
-        )
-    )
+  atestiguo_cols_vieja <- paste0("P3_", 1:6)
+  habito_cols_vieja    <- paste0("P4_", 1:5)
+  if ("P1" %in% cols && "P2" %in% cols &&
+      all(atestiguo_cols_vieja %in% cols) && all(habito_cols_vieja %in% cols) &&
+      all(c("ENT", "FOL", "CON", "V_SEL", "N_HOG") %in% cols)) {
+    return(tibble(
+      ENT   = str_pad(as.character(as.integer(df$ENT)), 2, pad = "0"),
+      FOL   = as.character(df$FOL),
+      CON   = as.character(df$CON),
+      V_SEL = as.character(df$V_SEL),
+      N_HOG = as.character(df$N_HOG),
+      percepcion  = as.integer(df[["P1"]]),
+      expectativa = as.integer(df[["P2"]]),
+      atestiguo_n = rowSums(sapply(df[atestiguo_cols_vieja], function(x) as.integer(x) == 1), na.rm = TRUE),
+      atestiguo_valido = rowSums(sapply(df[atestiguo_cols_vieja], function(x) as.integer(x) %in% c(1, 2)), na.rm = TRUE) > 0,
+      habito_n    = rowSums(sapply(df[habito_cols_vieja], function(x) as.integer(x) == 1), na.rm = TRUE),
+      habito_valido = rowSums(sapply(df[habito_cols_vieja], function(x) as.integer(x) %in% c(1, 2)), na.rm = TRUE) > 0,
+      ruta_cb = ruta,
+      necesita_join_viv = TRUE
+    ))
   }
-  
-  # Esquema 2013: P1 + sin geografía propia, necesita join con VIV
-  if ("P1" %in% cols && all(c("ENT", "FOL", "CON", "V_SEL", "N_HOG") %in% cols)) {
-    return(
-      df %>%
-        transmute(
-          ENT = str_pad(as.character(as.integer(ENT)), 2, pad = "0"),
-          FOL = as.character(FOL),
-          CON = as.character(CON),
-          V_SEL = as.character(V_SEL),
-          N_HOG = as.character(N_HOG),
-          percepcion = as.integer(P1),
-          ruta_cb = ruta,
-          necesita_join_viv = TRUE
-        )
-    )
-  }
-  
-  warning("CB sin variable de percepción reconocible: ", ruta,
-          " | Columnas: ", paste(cols, collapse = ", "))
+  warning("CB matches neither era pattern: ", ruta, " | Columns: ", paste(cols, collapse = ", "))
   return(NULL)
 }
-
-# ------------------------------------------------------------
-# 3. Aplicar a todos los CB de ENSU (excluye ECOSEP)
-# ------------------------------------------------------------
 
 cb_data_ensu <- inventario %>%
   filter(tipo == "CB", encuesta == "ENSU") %>%
   mutate(datos = map(ruta, leer_dbf_seguro))
 
-percepcion_extraida <- cb_data_ensu %>%
-  mutate(percep = map2(datos, ruta, extraer_percepcion))
+indicadores_extraidos <- cb_data_ensu %>%
+  mutate(ind = map2(datos, ruta, extraer_indicadores))
 
-# ------------------------------------------------------------
-# 4. Separar en dos grupos: ya tienen cve_mun vs necesitan join con VIV
-# ------------------------------------------------------------
-
-percep_con_geo <- percepcion_extraida %>%
-  mutate(tiene_geo = map_lgl(percep, ~ !is.null(.x) && "cve_mun" %in% colnames(.x))) %>%
+ind_con_geo <- indicadores_extraidos %>%
+  mutate(tiene_geo = map_lgl(ind, ~ !is.null(.x) && "cve_mun" %in% colnames(.x))) %>%
   filter(tiene_geo) %>%
-  pull(percep) %>%
+  pull(ind) %>%
   bind_rows()
 
-percep_sin_geo <- percepcion_extraida %>%
-  mutate(necesita_join = map_lgl(percep, ~ !is.null(.x) && "necesita_join_viv" %in% colnames(.x))) %>%
+ind_sin_geo <- indicadores_extraidos %>%
+  mutate(necesita_join = map_lgl(ind, ~ !is.null(.x) && "necesita_join_viv" %in% colnames(.x))) %>%
   filter(necesita_join)
-
-cat("Trimestres con geografía directa en CB:", nrow(percep_con_geo %>% distinct(ruta_cb)), "\n")
-cat("Trimestres que necesitan join con VIV (2013):", nrow(percep_sin_geo), "\n")
-
-# ------------------------------------------------------------
-# 5. Para los trimestres 2013: emparejar cada CB con su VIV
-#    (mismo trimestre = misma carpeta padre)
-# ------------------------------------------------------------
 
 carpeta_padre <- function(ruta) dirname(ruta)
 
-viv_2013 <- viv_data %>%
-  filter(str_detect(ruta, "ensu_bd_2013")) %>%
+viv_2013_2015 <- viv_data %>%
+  filter(str_detect(ruta, "ensu_bd_2013|ensu_bd_2014|ensu_bd_2015")) %>%
   mutate(
     carpeta = carpeta_padre(ruta),
     datos_geo = map(datos, agregar_cve_mun)
   )
 
-percep_2013_con_geo <- percep_sin_geo %>%
+ind_vieja_con_geo <- ind_sin_geo %>%
   mutate(carpeta = carpeta_padre(ruta)) %>%
-  left_join(viv_2013 %>% select(carpeta, datos_geo), by = "carpeta") %>%
+  left_join(viv_2013_2015 %>% select(carpeta, datos_geo), by = "carpeta") %>%
   mutate(
-    percep_join = map2(percep, datos_geo, function(cb_df, viv_df) {
+    ind_join = map2(ind, datos_geo, function(cb_df, viv_df) {
       if (is.null(cb_df) || is.null(viv_df)) return(NULL)
       viv_llaves <- viv_df %>%
         transmute(
@@ -450,24 +406,15 @@ percep_2013_con_geo <- percep_sin_geo %>%
       
       cb_df %>%
         left_join(viv_llaves, by = c("ENT", "FOL", "CON", "V_SEL", "N_HOG")) %>%
-        select(cve_mun, percepcion, ruta_cb)
+        select(cve_mun, percepcion, expectativa, atestiguo_n, atestiguo_valido,
+               habito_n, habito_valido, ruta_cb)
     })
   ) %>%
-  pull(percep_join) %>%
+  pull(ind_join) %>%
   bind_rows()
 
-cat("Filas 2013 con cve_mun asignado tras el join:",
-    sum(!is.na(percep_2013_con_geo$cve_mun)), "de", nrow(percep_2013_con_geo), "\n")
-
-# ------------------------------------------------------------
-# 6. Panel final combinado, homologado
-# ------------------------------------------------------------
-
-panel_percepcion_raw <- bind_rows(percep_con_geo, percep_2013_con_geo) %>%
-  filter(!is.na(cve_mun), !is.na(percepcion))
-
-# Extrae año y trimestre desde la ruta del archivo para agregar
-panel_percepcion_raw <- panel_percepcion_raw %>%
+panel_indicadores_raw <- bind_rows(ind_con_geo, ind_vieja_con_geo) %>%
+  filter(!is.na(cve_mun)) %>%
   mutate(
     ano = as.integer(str_extract(ruta_cb, "20(1[3-9]|20)")),
     mes = case_when(
@@ -479,37 +426,31 @@ panel_percepcion_raw <- panel_percepcion_raw %>%
     )
   )
 
-# Agregación a nivel municipio-trimestre: proporción que percibe inseguridad
-# Codificación oficial: 1 = seguro, 2 = inseguro, 9 = NS/NR (se excluye del denominador)
-panel_percepcion_municipio_trimestre <- panel_percepcion_raw %>%
-  filter(percepcion %in% c(1, 2)) %>%
-  group_by(cve_mun, ano, mes) %>%
-  summarise(
-    n_encuestados = n(),
-    prop_inseguro = mean(percepcion == 2),
-    .groups = "drop"
-  )
-
-# Colapsa a municipio-año (promedio de los 4 trimestres) para alinear con NDVI/homicidios
-panel_percepcion_municipio_ano <- panel_percepcion_municipio_trimestre %>%
+panel_inseguridad_municipio_ano <- panel_indicadores_raw %>%
   group_by(cve_mun, ano) %>%
   summarise(
-    n_trimestres = n(),
-    n_encuestados_total = sum(n_encuestados),
-    prop_inseguro = weighted.mean(prop_inseguro, w = n_encuestados),
+    n_encuestados       = n(),
+    
+    prop_inseguro       = mean(percepcion[percepcion %in% c(1, 2)] == 2, na.rm = TRUE),
+    n_valido_percepcion = sum(percepcion %in% c(1, 2)),
+    
+    prop_espera_empeorar = mean(expectativa[expectativa %in% 1:4] == 4, na.rm = TRUE),
+    n_valido_expectativa = sum(expectativa %in% 1:4),
+    
+    prop_atestiguo_alguno = mean(atestiguo_valido & atestiguo_n > 0, na.rm = TRUE),
+    indice_atestiguo      = mean(atestiguo_n[atestiguo_valido], na.rm = TRUE),  # 0-6 scale
+    n_valido_atestiguo     = sum(atestiguo_valido),
+    
+    prop_cambio_habito     = mean(habito_valido & habito_n > 0, na.rm = TRUE),
+    indice_habito          = mean(habito_n[habito_valido], na.rm = TRUE),       # 0-5 scale
+    n_valido_habito         = sum(habito_valido),
+    
     .groups = "drop"
   )
 
-cat("Municipios-año en el panel final:", nrow(panel_percepcion_municipio_ano), "\n")
-cat("Municipios distintos:", n_distinct(panel_percepcion_municipio_ano$cve_mun), "\n")
+# ==================================================================================== 
+# Code
+# ====================================================================================
 
-# Verificación Morelia
-panel_percepcion_municipio_ano %>% filter(cve_mun == "16053")
 
-# ------------------------------------------------------------
-# 7. Guardar
-# ------------------------------------------------------------
 
-dir.create("data", showWarnings = FALSE, recursive = TRUE)
-write.csv(panel_percepcion_municipio_trimestre, "data/panel_percepcion_municipio_trimestre.csv", row.names = FALSE)
-write.csv(panel_percepcion_municipio_ano, "data/panel_percepcion_municipio_ano.csv", row.names = FALSE)
