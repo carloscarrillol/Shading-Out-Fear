@@ -32,7 +32,6 @@ ruta_panel      <- "..."
 
 # -----------------------------------------------------------------------------------
 # Green spaces data (NDVI - Google Earth Engine)
-muni_names <- read_excel("...")     # Data base for municipality names and codes to merge sf
 municipios_sf <- st_read(ruta_shapefile, quiet = TRUE)
 
 archivos <- list.files(carpeta_rasters, pattern = "^MODIS_NDVI_Mexico_\\d{4}\\.tif$", full.names = TRUE)
@@ -82,18 +81,6 @@ if (length(anos_a_procesar) == 0) {
       paste(sort(unique(panel_final$year)), collapse = ", "), "\n")
 }
 
-
-colnames(muni_names) <- c("CVEGEO", "cve_ent", "NOM_ENT", "NOM_ABR",
-                          "cve_mun", "NAME_2", "CVE_CAB", "NOM_CAB",
-                          "POB_TOTAL", "POB_MASCULINA", "POB_FEMENINA", 
-                          "TOTAL DE VIVIENDAS HABITADAS")
-muni_names <- muni_names[-c(1:3),]
-
-ndvi <- ndvi %>%
-  left_join(muni_names %>% 
-              select(NAME_2, cve_mun, cve_ent), by = "NAME_2")
-ndvi <- ndvi %>%
-  mutate(cve_mun = as.integer(paste0(cve_ent, cve_mun)))
 # -----------------------------------------------------------------------------------
 # Murder data (as danger proxy) (SESNSP - INEGI)
 
@@ -462,13 +449,13 @@ panel_inseguridad_municipio_ano <- panel_indicadores_raw %>%
     .groups = "drop"
   )
 
-
+# Data base unification
 base_url <- "https://raw.githubusercontent.com/carloscarrillol/Shading-Out-Fear/main/data/"
-
 
 file_names <- c("panel_homicidios_mx_2011_2020.csv", 
                 "panel_inseguiridad_mun_ano.csv", 
-                "panel_ndvi_mx.csv")
+                "panel_ndvi_mx.csv",
+                "muni.xlsx")
 
 for (file in file_names) {
   full_url <- paste0(base_url, file)
@@ -476,16 +463,28 @@ for (file in file_names) {
   message(paste("Successfully downloaded:", file))
 }
 
-
 ndvi <- read.csv("panel_ndvi_mx.csv")
 homicidios <- read.csv("panel_homicidios_mx_2011_2020.csv")
 inseguridad <- read.csv("panel_inseguiridad_mun_ano.csv")
+muni_names <- read_excel("muni.xlsx")     # Data base for municipality names and codes to merge sf
 
+colnames(muni_names) <- c("CVEGEO", "cve_ent", "NOM_ENT", "NOM_ABR",
+                          "cve_mun", "NAME_2", "CVE_CAB", "NOM_CAB",
+                          "pob_tot", "pob_mas", "pob_fem", 
+                          "TOTAL DE VIVIENDAS HABITADAS")
+muni_names <- muni_names[-c(1:3),]
+
+ndvi <- ndvi %>%
+  left_join(muni_names %>% 
+              select(pob_tot, pob_mas, pob_fem, 
+                     NAME_2, cve_mun, cve_ent), 
+            by = "NAME_2")
+ndvi <- ndvi %>%
+  mutate(cve_mun = as.integer(paste0(cve_ent, cve_mun)))
 
 panel_final <- ndvi %>%
   inner_join(homicidios, by = c("cve_mun", "year" = "ano")) %>%
   inner_join(inseguridad, by = c("cve_mun", "year" = "ano"))
-
 
 # ================================================================================
 # REAL ECONOMETRICS CODING COMING SOON ...
